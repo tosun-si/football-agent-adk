@@ -1,0 +1,43 @@
+services:
+  adk-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - GCP_PROJECT_ID=gb-poc-373711
+      - GOOGLE_CLOUD_PROJECT=gb-poc-373711
+      - LOCATION=europe-west1
+      - GOOGLE_GENAI_USE_VERTEXAI=True
+      - BIGQUERY_DATASET=qatar_fifa_world_cup
+      - BIGQUERY_TABLE=team_players_stat_raw
+      - GOOGLE_APPLICATION_CREDENTIALS=/tmp/adc.json
+    volumes:
+      - ${HOME}/.config/gcloud/application_default_credentials.json:/tmp/adc.json:ro
+
+  agent-engine-proxy:
+    build:
+      context: ./agent_engine_proxy
+      dockerfile: Dockerfile
+    ports:
+      - "8081:8080"
+    environment:
+      - GCP_PROJECT_ID=gb-poc-373711
+      - LOCATION=europe-west1
+      - GOOGLE_APPLICATION_CREDENTIALS=/tmp/adc.json
+    volumes:
+      - ${HOME}/.config/gcloud/application_default_credentials.json:/tmp/adc.json:ro
+
+  webapp:
+    build:
+      context: ./webapp
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - CLOUD_RUN_API_URL=http://adk-agent:8080
+      - AGENT_ENGINE_PROXY_URL=http://agent-engine-proxy:8080
+    depends_on:
+      - adk-agent
+      - agent-engine-proxy

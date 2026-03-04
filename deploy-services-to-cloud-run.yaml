@@ -1,0 +1,66 @@
+substitutions:
+  _REGION: europe-west1
+  _REGISTRY: europe-west1-docker.pkg.dev/${PROJECT_ID}/internal-images
+
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    script: |
+      docker buildx create --use
+      docker buildx bake -f docker-bake.hcl --push
+    env:
+      - 'REGISTRY=${_REGISTRY}'
+
+  - name: 'gcr.io/google.com/cloudsdktool/google-cloud-cli:stable'
+    script: |
+      echo "--- Deploying ADK Agent API ---"
+      gcloud run deploy football-stats-api \
+        --image=${_REGISTRY}/football-stats-api:latest \
+        --region=${_REGION} \
+        --platform=managed \
+        --allow-unauthenticated \
+        --port=8080 \
+        --set-env-vars=GCP_PROJECT_ID=${PROJECT_ID} \
+        --set-env-vars=LOCATION=${_REGION} \
+        --set-env-vars=GOOGLE_GENAI_USE_VERTEXAI=True \
+        --set-env-vars=BIGQUERY_DATASET=qatar_fifa_world_cup \
+        --set-env-vars=BIGQUERY_TABLE=team_players_stat_raw \
+        --set-env-vars=PYTHONUNBUFFERED=1
+
+      echo "--- Deploying Agent Engine Proxy ---"
+      gcloud run deploy agent-engine-proxy \
+        --image=${_REGISTRY}/agent-engine-proxy:latest \
+        --region=${_REGION} \
+        --platform=managed \
+        --allow-unauthenticated \
+        --port=8080 \
+        --set-env-vars=GCP_PROJECT_ID=${PROJECT_ID} \
+        --set-env-vars=LOCATION=${_REGION}
+
+      echo "--- Deploying Webapp ---"
+      ADK_API_URL=$(gcloud run services describe football-stats-api --region=${_REGION} --format='value(status.url)')
+      PROXY_URL=$(gcloud run services describe agent-engine-proxy --region=${_REGION} --format='value(status.url)')
+
+      gcloud run deploy football-stats-webapp \
+        --image=${_REGISTRY}/football-stats-webapp:latest \
+        --region=${_REGION} \
+        --platform=managed \
+        --allow-unauthenticated \
+        --port=3000 \
+        --set-env-vars=CLOUD_RUN_API_URL=${ADK_API_URL} \
+        --set-env-vars=AGENT_ENGINE_PROXY_URL=${PROXY_URL}
+
+  - name: 'ghcr.io/astral-sh/uv:python3.11-alpine'
+    script: |
+      uv sync --frozen --no-dev
+      uv run adk deploy agent_engine \
+        --project "${PROJECT_ID}" \
+        --region "${_REGION}" \
+        --display_name "football-stats-agent" \
+        --description "Football stats agent using ADK and BigQuery MCP via Cloud API Registry" \
+        football_stats_agent
+    env:
+      - 'GCP_PROJECT_ID=${PROJECT_ID}'
+      - 'LOCATION=${_REGION}'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
