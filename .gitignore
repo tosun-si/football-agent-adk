@@ -12,3 +12,8 @@ $.iml
 
 # Virtual environments
 .venv
+
+# Node / Frontend
+node_modules/
+.next/
+.env.local
