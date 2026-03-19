@@ -25,6 +25,7 @@ services:
     environment:
       - GCP_PROJECT_ID=gb-poc-373711
       - LOCATION=europe-west1
+      - ENGINE_ID=${ENGINE_ID}
       - GOOGLE_APPLICATION_CREDENTIALS=/tmp/adc.json
     volumes:
       - ${HOME}/.config/gcloud/application_default_credentials.json:/tmp/adc.json:ro

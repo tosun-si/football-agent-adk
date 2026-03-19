@@ -40,6 +40,9 @@ Football statistics agent for the Qatar 2022 World Cup, built with Google Agent 
 │   ├── Dockerfile                   # Multi-stage build with uv
 │   ├── pyproject.toml               # Dependencies (uv-managed)
 │   └── deploy.sh                    # Cloud Run deployment (uses Docker Bake)
+├── raw_data/                        # Dataset + BigQuery load script
+│   ├── world_cup_team_players_stats_raw_ndjson.json
+│   └── create_and_load_team_stats_raw_table.sh
 ├── diagrams/                        # Architecture diagrams
 │   ├── adk_gcp_football_stats_agent.excalidraw
 │   └── adk_gcp_football_stats_agent.png
@@ -47,7 +50,7 @@ Football statistics agent for the Qatar 2022 World Cup, built with Google Agent 
 ├── deploy_api.sh                    # Cloud Run deployment script (local, uses docker buildx)
 ├── deploy-services-to-cloud-run.yaml # Cloud Build CI/CD pipeline (bake + deploy all 3 services)
 ├── Dockerfile                       # ADK agent multi-stage build with uv
-├── docker-bake.hcl                  # Docker Bake config (centralized builds + registry cache)
+├── docker-bake-agentic-apps.hcl                  # Docker Bake config (centralized builds + registry cache)
 ├── docker-compose.yaml              # Local dev runtime (all 3 services)
 ├── .dockerignore                    # Root Docker build context filter
 ├── .gcloudignore                    # Cloud Build source upload filter
@@ -66,7 +69,7 @@ Football statistics agent for the Qatar 2022 World Cup, built with Google Agent 
 ### 1. Vertex AI Agent Engine (Recommended)
 Managed path using the `adk deploy agent_engine` CLI command. This handles agent serialization properly (avoids pickling issues with MCP toolsets) and enables the **Playground** in the console.
 - **Command**: `./deploy_agent_engine.sh`
-- **Resource Name**: `projects/975119474255/locations/europe-west1/reasoningEngines/8838921199133130752`
+- **Resource Name**: `projects/975119474255/locations/europe-west1/reasoningEngines/5278544218720043008`
 - **Console**: [Vertex AI Agent Engines Dashboard](https://console.cloud.google.com/vertex-ai/agents/agent-engines?project=gb-poc-373711)
 - **How to Test**:
     - Go to the [Agent Engines Dashboard](https://console.cloud.google.com/vertex-ai/agents/agent-engines?project=gb-poc-373711).
@@ -101,6 +104,12 @@ Standard REST API path. Exposes agent endpoints via FastAPI.
 - **Container**: Multi-stage `Dockerfile` with uv, uses `adk api_server` and listens on **port 8080**.
 - **Docs**: Swagger UI available at `/docs` endpoint.
 - **Docker note**: The runtime stage uses `WORKDIR /agents` with the agent package at `/agents/football_stats_agent/` so ADK can discover it by convention. Do NOT copy `agent_config.yaml` into this path — it interferes with ADK's YAML loader.
+
+## Dataset (raw_data/)
+- `world_cup_team_players_stats_raw_ndjson.json` — Raw player statistics in NDJSON format
+- `create_and_load_team_stats_raw_table.sh` — Loads data into BigQuery via `bq load --autodetect`
+- **Env vars**: `PROJECT_ID`, `REGION`, `BUCKET_PATH` (GCS path where the NDJSON file is uploaded)
+- **Target table**: `qatar_fifa_world_cup.team_players_stat_raw`
 
 ## GCP Configuration
 - **Project ID**: `gb-poc-373711`
@@ -226,6 +235,7 @@ docker buildx bake
 
 ### Run all services
 ```bash
+export ENGINE_ID=your-engine-id   # Required by the proxy (from adk deploy agent_engine)
 docker compose up
 ```
 
@@ -253,7 +263,7 @@ Docker Compose mounts `~/.config/gcloud` read-only into the Python containers. T
 
 ## Docker Bake (Centralized Builds)
 
-`docker-bake.hcl` defines all 3 build targets with Artifact Registry tags and **registry-based cache**. Docker Compose also uses it automatically.
+`docker-bake-agentic-apps.hcl` defines all 3 build targets with Artifact Registry tags and **registry-based cache**. Docker Compose also uses it automatically.
 
 ```bash
 # Build all images
@@ -282,30 +292,25 @@ Both `deploy_api.sh` and `agent_engine_proxy/deploy.sh` build for `linux/amd64` 
 
 ## CI/CD with Cloud Build
 
-`deploy-services-to-cloud-run.yaml` is the Cloud Build pipeline that builds all images, deploys all 3 services to Cloud Run, and deploys the agent to Vertex AI Agent Engine.
+`deploy-services-to-cloud-run.yaml` is the Cloud Build pipeline that builds all images and deploys all 3 Cloud Run services.
 
 ### Pipeline steps
 1. **Build & push** (`gcr.io/cloud-builders/docker`) — `docker buildx bake --push` builds all 3 images with registry cache and pushes to Artifact Registry
-2. **Deploy Cloud Run** (`google-cloud-cli:stable`) — Deploys all 3 services in a single step:
+2. **Deploy Agent Engine** (`uv:python3.11-alpine`) — `uv pip install --system google-adk` + `adk deploy agent_engine`
+3. **Deploy Cloud Run** (`google-cloud-cli:slim`) — Retrieves the latest Agent Engine ID via Vertex AI REST API, then deploys all 3 services:
    - `football-stats-api` with BigQuery/Vertex AI env vars
-   - `agent-engine-proxy` with project/location env vars
+   - `agent-engine-proxy` with project/location env vars + `ENGINE_ID` (dynamically retrieved from step 2)
    - `football-stats-webapp` dynamically fetches ADK API and Proxy URLs from deployed services
-3. **Deploy Agent Engine** (`uv:python3.11-alpine`) — `uv sync` + `adk deploy agent_engine` to deploy the agent to Vertex AI Agent Engine
 
 ### Run the pipeline
 ```bash
-gcloud builds submit --config deploy-services-to-cloud-run.yaml --project gb-poc-373711
+gcloud builds submit --config deploy-services-to-cloud-run.yaml --project gb-poc-373711 --region europe-west1
 ```
 
-### Substitution variables
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `_REGION` | `europe-west1` | Cloud Run and Artifact Registry region |
-| `_REGISTRY` | `europe-west1-docker.pkg.dev/${PROJECT_ID}/internal-images` | Artifact Registry path |
-| `PROJECT_ID` | (from gcloud) | GCP project ID |
+Uses Cloud Build predefined substitutions `$PROJECT_ID` (from `--project`) and `$LOCATION` (from `--region`). The Agent Engine ID is dynamically retrieved via REST API after deployment.
 
 ### Source upload filter
-`.gcloudignore` excludes unnecessary files from `gcloud builds submit` uploads: `.git`, `.venv`, `node_modules`, `.next`, IDE files, docs, and local config. Keeps only what Docker Bake needs (Dockerfiles, source code, lock files, `docker-bake.hcl`).
+`.gcloudignore` excludes unnecessary files from `gcloud builds submit` uploads: `.git`, `.venv`, `node_modules`, `.next`, IDE files, docs, and local config. Keeps only what Docker Bake needs (Dockerfiles, source code, lock files, `docker-bake-agentic-apps.hcl`).
 
 ## Dockerfiles (Multi-stage Builds with uv)
 
@@ -337,7 +342,9 @@ The webapp uses `output: "standalone"` in `next.config.ts` for optimized Docker 
 
 ## Agent Engine Proxy (FastAPI)
 
-Small FastAPI proxy that wraps the Vertex AI `ReasoningEngine.stream_query()` API. Managed with uv via its own `pyproject.toml`.
+Small FastAPI proxy that wraps the Vertex AI Agent Engine streaming API. Managed with uv via its own `pyproject.toml`.
+
+The proxy creates a **session** before each query (`async_create_session`), then calls `async_stream_query` with the session ID. This is required — without a session, the Agent Engine's MCP connection to BigQuery drops before the agent can complete its full reasoning loop (tool call → BigQuery result → text response).
 
 ### Run locally (without Docker)
 ```bash
@@ -352,6 +359,3 @@ cd agent_engine_proxy
 ```
 
 After deployment, update `AGENT_ENGINE_PROXY_URL` in `.envrc` with the Cloud Run URL and run `direnv allow`.
-
-### Known behavior
-The Agent Engine streaming API may send a final `{"code": 498, "message": "Connection closed"}` event after a successful response (MCP cleanup). The proxy ignores this if a response was already collected.

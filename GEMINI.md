@@ -15,7 +15,7 @@ Goal: Create a helpful football stats assistant application using the Google Age
 ### 1. Vertex AI Agent Engine (Recommended)
 Managed path using the `adk deploy agent_engine` CLI command. This handles agent serialization properly (avoids pickling issues with MCP toolsets) and enables the **Playground** in the console.
 - **Command**: `./deploy_agent_engine.sh`
-- **Resource Name**: `projects/975119474255/locations/europe-west1/reasoningEngines/8838921199133130752`
+- **Resource Name**: `projects/975119474255/locations/europe-west1/reasoningEngines/5278544218720043008`
 - **Console**: [Vertex AI Agent Engines Dashboard](https://console.cloud.google.com/vertex-ai/agents/agent-engines?project=gb-poc-373711)
 - **How to Test**:
     - Go to the [Agent Engines Dashboard](https://console.cloud.google.com/vertex-ai/agents/agent-engines?project=gb-poc-373711).
@@ -48,6 +48,12 @@ Standard REST path using FastAPI.
              }
            }'
       ```
+
+## Dataset (raw_data/)
+- `world_cup_team_players_stats_raw_ndjson.json` — Raw player statistics in NDJSON format
+- `create_and_load_team_stats_raw_table.sh` — Loads data into BigQuery via `bq load --autodetect`
+- **Env vars**: `PROJECT_ID`, `REGION`, `BUCKET_PATH` (GCS path where the NDJSON file is uploaded)
+- **Target table**: `qatar_fifa_world_cup.team_players_stat_raw`
 
 ## Data Source
 - **GCP Project**: `gb-poc-373711` (Project Number: `975119474255`)
@@ -88,6 +94,9 @@ All 3 services (ADK agent, Agent Engine proxy, webapp) can run locally via Docke
 # Build all images (centralized via Docker Bake)
 docker buildx bake
 
+# Set the Agent Engine ID (required by the proxy)
+export ENGINE_ID=your-engine-id
+
 # Run all services
 docker compose up
 ```
@@ -101,7 +110,7 @@ docker compose up
 
 ## Docker Bake (Centralized Builds)
 
-`docker-bake.hcl` defines build targets for all 3 services with Artifact Registry tags and **registry-based cache**.
+`docker-bake-agentic-apps.hcl` defines build targets for all 3 services with Artifact Registry tags and **registry-based cache**.
 
 ```bash
 # Build all
@@ -130,27 +139,22 @@ Each target uses `cache-from`/`cache-to` with `type=registry` and `mode=max` (ca
 
 ## CI/CD with Cloud Build
 
-`deploy-services-to-cloud-run.yaml` builds all images, deploys all 3 services to Cloud Run, and deploys the agent to Vertex AI Agent Engine.
+`deploy-services-to-cloud-run.yaml` builds all images and deploys all 3 Cloud Run services.
 
 ### Pipeline steps
 1. **Build & push** (`gcr.io/cloud-builders/docker`) — `docker buildx bake --push` with registry cache
-2. **Deploy Cloud Run** (`google-cloud-cli:stable`) — All 3 services in one step:
+2. **Deploy Agent Engine** (`uv:python3.11-alpine`) — `uv pip install --system google-adk` + `adk deploy agent_engine`
+3. **Deploy Cloud Run** (`google-cloud-cli:slim`) — Retrieves the latest Agent Engine ID via Vertex AI REST API, then deploys all 3 services:
    - `football-stats-api` with BigQuery/Vertex AI env vars
-   - `agent-engine-proxy` with project/location env vars
+   - `agent-engine-proxy` with project/location env vars + `ENGINE_ID` (dynamically retrieved from step 2)
    - `football-stats-webapp` dynamically fetches URLs from deployed services
-3. **Deploy Agent Engine** (`uv:python3.11-alpine`) — `uv sync` + `adk deploy agent_engine`
 
 ### Run
 ```bash
-gcloud builds submit --config deploy-services-to-cloud-run.yaml --project gb-poc-373711
+gcloud builds submit --config deploy-services-to-cloud-run.yaml --project gb-poc-373711 --region europe-west1
 ```
 
-### Substitution variables
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `_REGION` | `europe-west1` | Cloud Run and Artifact Registry region |
-| `_REGISTRY` | `europe-west1-docker.pkg.dev/${PROJECT_ID}/internal-images` | Artifact Registry path |
-| `PROJECT_ID` | (from gcloud) | GCP project ID |
+Uses Cloud Build predefined substitutions `$PROJECT_ID` (from `--project`) and `$LOCATION` (from `--region`). The Agent Engine ID is dynamically retrieved via REST API after deployment.
 
 ### Source upload filter
 `.gcloudignore` excludes `.git`, `.venv`, `node_modules`, `.next`, IDE files, docs, and local config from Cloud Build uploads.
@@ -173,7 +177,9 @@ cd webapp && npm install && npm run dev
 Backend URLs (`CLOUD_RUN_API_URL`, `AGENT_ENGINE_PROXY_URL`) are managed via `.envrc` (direnv) at the project root — no `.env.local` needed. Next.js API routes read them from `process.env`. When running with Docker Compose, these are overridden by the `environment` block in `docker-compose.yaml`.
 
 ## Agent Engine Proxy (FastAPI)
-A FastAPI proxy in `agent_engine_proxy/` that wraps `ReasoningEngine.stream_query()` for the webapp. Managed with uv via its own `pyproject.toml`.
+A FastAPI proxy in `agent_engine_proxy/` that wraps the Vertex AI Agent Engine streaming API. Managed with uv via its own `pyproject.toml`.
+
+The proxy creates a **session** before each query (`async_create_session`), then calls `async_stream_query` with the session ID. This is required — without a session, the MCP connection drops before the agent completes its reasoning loop.
 
 ### Run locally (without Docker)
 ```bash

@@ -39,6 +39,21 @@ Two deployment paths to Google Cloud:
 - Node.js 22+ (for webapp local dev)
 - A GCP project with BigQuery, Vertex AI, and Cloud API Registry enabled
 
+## Dataset
+
+The `raw_data/` folder contains the Qatar 2022 World Cup player statistics in NDJSON format and a script to load it into BigQuery.
+
+```bash
+# Upload the NDJSON file to a GCS bucket, then:
+export PROJECT_ID=your-gcp-project-id
+export REGION=europe-west1
+export BUCKET_PATH=your-bucket-name/path
+
+./raw_data/create_and_load_team_stats_raw_table.sh
+```
+
+This creates the `qatar_fifa_world_cup.team_players_stat_raw` table with auto-detected schema.
+
 ## Quick Start
 
 ### 1. Clone and setup environment
@@ -66,6 +81,7 @@ Open http://localhost:8000 to interact with the agent.
 
 ```bash
 docker buildx bake      # Build all 3 images
+export ENGINE_ID=your-engine-id   # Required by the proxy
 docker compose up        # Start all services
 ```
 
@@ -82,10 +98,13 @@ docker compose up        # Start all services
 Deploy everything in a single pipeline:
 
 ```bash
-gcloud builds submit --config deploy-services-to-cloud-run.yaml --project gb-poc-373711
+gcloud builds submit --config deploy-services-to-cloud-run.yaml --project gb-poc-373711 --region europe-west1
 ```
 
-This builds all images with Docker Bake (with registry cache), deploys all 3 services to Cloud Run, and deploys the agent to Vertex AI Agent Engine.
+This pipeline uses Cloud Build predefined substitutions (`$PROJECT_ID`, `$LOCATION`) and runs 3 steps:
+1. **Build & push** — Docker Bake builds all 3 images with registry cache
+2. **Deploy Agent Engine** — Installs `google-adk` via uv and deploys the agent to Vertex AI
+3. **Deploy Cloud Run** — Deploys all 3 services (ADK API, Agent Engine Proxy, Webapp)
 
 ### Manual Deployment
 
@@ -118,12 +137,15 @@ cd agent_engine_proxy && ./deploy.sh
 │   ├── Dockerfile                   # Multi-stage build with uv
 │   ├── pyproject.toml               # Dependencies (uv-managed)
 │   └── deploy.sh                    # Cloud Run deployment
+├── raw_data/                        # Dataset + BigQuery load script
+│   ├── world_cup_team_players_stats_raw_ndjson.json
+│   └── create_and_load_team_stats_raw_table.sh
 ├── diagrams/                        # Architecture diagrams
 ├── deploy_agent_engine.sh           # Vertex AI Agent Engine deployment
 ├── deploy_api.sh                    # Cloud Run deployment (local)
 ├── deploy-services-to-cloud-run.yaml # Cloud Build CI/CD pipeline
 ├── Dockerfile                       # ADK agent multi-stage build with uv
-├── docker-bake.hcl                  # Docker Bake (centralized builds + registry cache)
+├── docker-bake-agentic-apps.hcl                  # Docker Bake (centralized builds + registry cache)
 ├── docker-compose.yaml              # Local dev (all 3 services)
 ├── .envrc                           # Environment variables (direnv)
 ├── pyproject.toml                   # Python dependencies
