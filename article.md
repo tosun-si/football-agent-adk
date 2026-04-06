@@ -201,9 +201,11 @@ However, **Agent Engine doesn't expose a public REST API directly**. To call it 
 For the Cloud Run deployment, the agent is packaged with a multi-stage Dockerfile using `uv`:
 
 ```dockerfile
-FROM python:3.11-slim AS builder
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
-WORKDIR /app
+FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim AS builder
+
+ENV APP_DIR=/usr/local/src/app
+WORKDIR ${APP_DIR}
+
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-install-project
@@ -213,23 +215,30 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
 
 FROM python:3.11-slim
+
+ENV APP_DIR=/usr/local/src/app
+
 RUN groupadd --gid 1001 appuser && \
     useradd --uid 1001 --gid 1001 --create-home appuser
 WORKDIR /agents
-COPY --from=builder --chown=appuser:appuser /app/.venv /app/.venv
-COPY --from=builder --chown=appuser:appuser /app/football_stats_agent/ \
-    ./football_stats_agent/
-ENV PATH="/app/.venv/bin:$PATH"
+COPY --from=builder --chown=appuser:appuser ${APP_DIR}/.venv ${APP_DIR}/.venv
+COPY --from=builder --chown=appuser:appuser \
+    ${APP_DIR}/football_stats_agent/ ./football_stats_agent/
+ENV PATH="${APP_DIR}/.venv/bin:$PATH"
 USER appuser
-CMD ["adk", "api_server", "--host", "0.0.0.0", "--port", "8080"]
+
+ENTRYPOINT ["adk"]
+CMD ["api_server", "--host", "0.0.0.0", "--port", "8080"]
 ```
 
 Key details:
-- **Multi-stage build** — Dependencies are installed in a builder stage, then only the `.venv` is copied to the runtime image
+- **`uv` base image** — The builder uses `ghcr.io/astral-sh/uv:python3.11-bookworm-slim` which includes both Python and uv, instead of copying uv into a separate Python image
+- **`APP_DIR` variable** — Avoids hardcoded paths across stages
+- **Multi-stage build** — Dependencies are installed in the builder stage, then only the `.venv` is copied to the runtime image
 - **`uv` cache mount** — `--mount=type=cache` avoids re-downloading packages on every build
 - **Non-root user** — The container runs as `appuser` (UID 1001) for security
 - **`WORKDIR /agents`** — ADK discovers the agent package by convention from this directory
-- **`adk api_server`** — Exposes the agent as a REST API with Swagger UI at `/docs`
+- **Split `ENTRYPOINT`/`CMD`** — Makes it easy to override arguments without replacing the executable
 
 Deploy to Cloud Run with:
 
@@ -484,9 +493,11 @@ The backend URLs are configured via environment variables (`CLOUD_RUN_API_URL`, 
 
 4. **`adk deploy` over custom scripts** — The CLI handles MCP toolset serialization correctly. Custom Python deploy scripts fail with pickling errors.
 
-5. **Docker Bake with registry cache** — Centralizes multi-service builds and dramatically speeds up CI/CD with layer caching in Artifact Registry.
+5. **MCP toolsets are unstable in Agent Engine** — After inactivity, Agent Engine freezes/thaws the process instead of fully restarting it. The MCP connection goes stale and tool calls fail with `McpError: Connection closed`. A redeployment is required to restore it. Using custom function tools (stateless BigQuery client calls) instead of MCP toolsets would avoid this. For production, **prefer the Cloud Run path**, which handles cold starts correctly.
 
-6. **System instructions matter** — The agent's accuracy depends heavily on the system instruction. Include the full table schema, column types, naming conventions (camelCase!), and business rules for calculations.
+6. **Docker Bake with registry cache** — Centralizes multi-service builds and dramatically speeds up CI/CD with layer caching in Artifact Registry.
+
+7. **System instructions matter** — The agent's accuracy depends heavily on the system instruction. Include the full table schema, column types, naming conventions (camelCase!), and business rules for calculations.
 
 ---
 

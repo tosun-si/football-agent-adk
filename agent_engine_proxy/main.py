@@ -21,7 +21,7 @@ app.add_middleware(
 
 LOCATION = os.environ.get("LOCATION", "europe-west1")
 PROJECT_NUMBER = os.environ.get("PROJECT_NUMBER", "975119474255")
-ENGINE_ID = os.environ.get("ENGINE_ID", "5278544218720043008")
+ENGINE_ID = os.environ.get("ENGINE_ID", "8813658819973349376")
 RESOURCE_NAME = (
     f"projects/{PROJECT_NUMBER}/locations/{LOCATION}/reasoningEngines/{ENGINE_ID}"
 )

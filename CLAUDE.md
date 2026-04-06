@@ -69,7 +69,7 @@ Football statistics agent for the Qatar 2022 World Cup, built with Google Agent 
 ### 1. Vertex AI Agent Engine (Recommended)
 Managed path using the `adk deploy agent_engine` CLI command. This handles agent serialization properly (avoids pickling issues with MCP toolsets) and enables the **Playground** in the console.
 - **Command**: `./deploy_agent_engine.sh`
-- **Resource Name**: `projects/975119474255/locations/europe-west1/reasoningEngines/5278544218720043008`
+- **Resource Name**: `projects/975119474255/locations/europe-west1/reasoningEngines/8813658819973349376`
 - **Console**: [Vertex AI Agent Engines Dashboard](https://console.cloud.google.com/vertex-ai/agents/agent-engines?project=gb-poc-373711)
 - **How to Test**:
     - Go to the [Agent Engines Dashboard](https://console.cloud.google.com/vertex-ai/agents/agent-engines?project=gb-poc-373711).
@@ -316,8 +316,8 @@ Uses Cloud Build predefined substitutions `$PROJECT_ID` (from `--project`) and `
 
 All Python services use multi-stage builds: **builder** (install deps with uv + cache mounts) then **runtime** (slim image, copy only `.venv`).
 
-- **Root `Dockerfile`** (ADK agent): Builder installs from `uv.lock` with `--frozen`. Runtime uses `WORKDIR /agents` so ADK discovers the agent package by convention.
-- **`agent_engine_proxy/Dockerfile`**: Builder installs from `pyproject.toml`. Runtime copies `.venv` + `main.py`.
+- **Root `Dockerfile`** (ADK agent): Builder uses `ghcr.io/astral-sh/uv:python3.11-bookworm-slim` base image with `APP_DIR=/usr/local/src/app`. Installs from `uv.lock` with `--frozen`. Runtime uses `WORKDIR /agents` so ADK discovers the agent package by convention. Split `ENTRYPOINT ["adk"]` / `CMD ["api_server", ...]`.
+- **`agent_engine_proxy/Dockerfile`**: Same uv base image and `APP_DIR` pattern. Builder installs from `pyproject.toml`. Runtime copies `.venv` + `main.py`. Split `ENTRYPOINT ["uvicorn"]` / `CMD ["main:app", ...]`.
 - **`webapp/Dockerfile`**: 3-stage Next.js build (deps -> builder -> standalone runner). Requires `output: "standalone"` in `next.config.ts`.
 
 ## Web App (Next.js Chat UI)
