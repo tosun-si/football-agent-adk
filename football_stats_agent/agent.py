@@ -1,7 +1,7 @@
 import os
 
 from google.adk.agents import LlmAgent
-from google.adk.tools.api_registry import ApiRegistry
+from google.adk.integrations.api_registry import ApiRegistry
 from vertexai.preview.reasoning_engines import AdkApp
 
 PROJECT_ID = os.environ.get("GCP_PROJECT_ID", "gb-poc-373711")
@@ -88,6 +88,7 @@ def create_agent():
 
 
 def create_app():
+    """Used for programmatic deployment via ModuleAgent and agent_engines.create()."""
     agent = create_agent()
     return AdkApp(
         agent=agent,

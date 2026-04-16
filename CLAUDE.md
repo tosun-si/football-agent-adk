@@ -75,7 +75,7 @@ Managed path using the `adk deploy agent_engine` CLI command. This handles agent
     - Go to the [Agent Engines Dashboard](https://console.cloud.google.com/vertex-ai/agents/agent-engines?project=gb-poc-373711).
     - Select the engine and use the **Playground** tab to interact with the agent.
 - **Key Requirement**: The Reasoning Engine service account (`service-{PROJECT_NUMBER}@gcp-sa-aiplatform-re.iam.gserviceaccount.com`) needs **both** `roles/mcp.toolUser` (to call MCP tools) and `roles/cloudapiregistry.viewer` (to discover MCP servers in the API Registry). Without `cloudapiregistry.viewer`, the deployment fails with "MCP server not found".
-- **Important**: Use `adk deploy agent_engine` instead of a custom Python deploy script. Custom scripts using `ReasoningEngine.create()` with `AdkApp` fail with pickling errors (`cannot pickle '_io.TextIOWrapper'`) due to MCP toolsets. The CLI handles serialization correctly and enables the Playground.
+- **Deployment options**: The `adk deploy agent_engine` CLI is the simplest path — it handles serialization automatically and enables the Playground. Passing `AdkApp` directly to `ReasoningEngine.create()` fails with pickling errors (`cannot pickle '_io.TextIOWrapper'`) due to MCP toolsets. An alternative Python approach using `ModuleAgent` via `agent_engines.create()` also works — it uploads the agent as a Python module, avoiding serialization. The `create_app()` function in `agent.py` wraps the agent in `AdkApp` for this programmatic path.
 
 ### 2. ADK API Server (Cloud Run)
 Standard REST API path. Exposes agent endpoints via FastAPI.
@@ -220,7 +220,7 @@ uv run adk web
 ## Troubleshooting
 - **McpError: Connection closed**: Check IAM roles and camelCase column names.
 - **ValueError: MCP server not found**: Ensure the Service Account has both `roles/mcp.toolUser` and `roles/cloudapiregistry.viewer`. Use project **number** vs **ID** in the resource string as a fallback.
-- **cannot pickle '_io.TextIOWrapper'**: Use `adk deploy agent_engine` CLI instead of custom Python deploy scripts. The CLI handles MCP toolset serialization correctly and enables the Playground.
+- **cannot pickle '_io.TextIOWrapper'**: This occurs when passing `AdkApp` directly to `ReasoningEngine.create()`. Use the `adk deploy agent_engine` CLI (simplest) or the `ModuleAgent` approach via `agent_engines.create()` (uploads agent as a Python module, avoids serialization).
 - **Cloud Run Port**: Cloud Run expects the container to listen on `8080`.
 - **adk api_server arguments**: Use `adk api_server` without `--app` in the CMD to automatically pick up `agent_config.yaml`.
 

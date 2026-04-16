@@ -268,7 +268,7 @@ uv run adk deploy agent_engine \
     football_stats_agent
 ```
 
-**Important**: Use `adk deploy agent_engine` instead of custom Python deploy scripts. Custom scripts using `ReasoningEngine.create()` with `AdkApp` fail with pickling errors due to MCP toolsets. The CLI handles serialization correctly and enables the Playground.
+In this article, we use the `adk deploy agent_engine` CLI, which handles serialization automatically and enables the Playground UI. Note that passing `AdkApp` directly to `ReasoningEngine.create()` fails with pickling errors due to MCP toolsets. An alternative Python approach using `ModuleAgent` via `agent_engines.create()` also works — it uploads the agent as a Python module, avoiding serialization entirely. The `create_app()` function in the agent code wraps the agent in `AdkApp`, which is useful for this programmatic deployment path.
 
 ### The Agent Engine Proxy
 
@@ -491,7 +491,7 @@ The backend URLs are configured via environment variables (`CLOUD_RUN_API_URL`, 
 
 3. **Cloud Run vs Agent Engine** — Cloud Run is simpler and cheaper for most use cases. Agent Engine adds managed versioning and a Playground UI but requires an additional proxy service to expose a public API.
 
-4. **`adk deploy` over custom scripts** — The CLI handles MCP toolset serialization correctly. Custom Python deploy scripts fail with pickling errors.
+4. **`adk deploy` over custom scripts** — The CLI handles MCP toolset serialization correctly. Passing `AdkApp` directly to `ReasoningEngine.create()` fails with pickling errors. A Python alternative exists using `ModuleAgent` via `agent_engines.create()`, which avoids serialization by uploading the agent as a module.
 
 5. **MCP toolsets are unstable in Agent Engine** — After inactivity, Agent Engine freezes/thaws the process instead of fully restarting it. The MCP connection goes stale and tool calls fail with `McpError: Connection closed`. A redeployment is required to restore it. Using custom function tools (stateless BigQuery client calls) instead of MCP toolsets would avoid this. For production, **prefer the Cloud Run path**, which handles cold starts correctly.
 
